@@ -14,7 +14,7 @@
     pip install pandas
     pip install folium
 
-然后找到自己想爬取的城市，此处以杭州市为例 (https://hz.zu.ke.com/zufang)， 务必是此类型页面。
+然后找到自己想爬取的城市，此处以杭州市为例   https://hz.zu.ke.com/zufang  务必是此类型页面。
 <img width="1895" height="880" alt="image" src="https://github.com/user-attachments/assets/915295c2-c2ea-4314-8b70-b4b958fa50ec" />
 
 确认后复制以下代码到python，按照#号后面的注释修改代码
@@ -432,5 +432,6 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
     
     if __name__ == '__main__':
         main()
+
 
 
