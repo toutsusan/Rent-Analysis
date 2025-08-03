@@ -26,14 +26,21 @@
     import random
     import re
     
+    
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+    ]
+    
     def parse_standard_listing(item):
         try:
             title_element = item.find('p', class_='content__list--item--title')
             if not title_element or not title_element.find('a'):
                 return None
     
-            detail_link = "https://hz.zu.ke.com" + title_element.find('a')['href']  #此处更换自己所查取的网站
-    
+            detail_link = "https://hz.zu.ke.com" + title_element.find('a')['href'] #此处更换自己所查取的网站
             if '/apartment/' in detail_link:
                 return None
     
@@ -49,81 +56,107 @@
                 price_text = price_element.find('em').get_text(strip=True)
                 listing_data['价格(元/月)'] = int(price_text) if price_text.isdigit() else 0
             else:
-                return None 
-    
+                return None
     
             des_element = item.find('p', class_='content__list--item--des')
             if des_element:
                 full_des_text = des_element.get_text(strip=True)
                 des_parts = [part.strip() for part in full_des_text.split('/')]
-    
                 if des_parts:
                     location_info = des_parts.pop(0).replace('·', ' - ')
                     listing_data['区域'] = location_info
-    
                 for part in des_parts:
                     if '㎡' in part:
                         listing_data['面积(㎡)'] = re.sub(r'\s*㎡', '', part)
                     elif '室' in part or '厅' in part or '卫' in part:
                         listing_data['户型'] = part
-                    # 简单的朝向判断
                     elif len(part.strip()) <= 2 and any(d in part for d in ['东', '南', '西', '北']):
                         listing_data['朝向'] = part
-    
             return listing_data
-    
         except Exception as e:
-    
             print(f"解析单个房源时出错: {e}")
             return None
     
+    def make_request_with_retry(url, headers, proxies=None, retries=3, delay=5):
+        """
+        发送带有重试逻辑的HTTP GET请求。
+        :param url: 请求的URL
+        :param headers: 请求头
+        :param proxies: 代理设置
+        :param retries: 最大重试次数
+        :param delay: 重试前的等待时间（秒）
+        :return: 成功则返回Response对象，否则返回None
+        """
+        for i in range(retries):
+            try:
+                response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
+                response.raise_for_status() 
+                return response
+            except requests.exceptions.Timeout:
+                print(f"请求超时 (尝试 {i+1}/{retries})")
+            except requests.exceptions.ProxyError as e:
+                print(f"代理错误 (尝试 {i+1}/{retries}): {e}")
+            except requests.exceptions.RequestException as e:
+                print(f"请求失败 (尝试 {i+1}/{retries}): {e}")
+    
+            if i < retries - 1:
+                print(f"将在 {delay} 秒后重试...")
+                time.sleep(delay)
+        return None
+    
     def get_beike_rent_info_final_v2(max_pages=5):
-    
         base_url = "https://hz.zu.ke.com/zufang" #此处更换自己所查取的网站
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        }
-    
         all_listings = []
-        print(f"--- 自动跳过所有品牌公寓房源 ---")
+        print("--- 爬虫启动，将自动跳过所有品牌公寓房源 ---")
     
         for page in range(1, max_pages + 1):
-    
             url = f"{base_url}/pg{page}/"
+            print(f"正在准备爬取第 {page} 页: {url}")
     
+            # --- 修改: 每次请求都使用随机User-Agent ---
+            headers = {
+                'User-Agent': random.choice(USER_AGENTS),
+            }
     
-            print(f"正在爬取第 {page} 页: {url}")
+            # --- 新增: 代理IP设置 (默认关闭) ---
+            # 如果您有代理IP，请取消下面的注释并填入您的代理信息
+            proxies = {
+                "http": "http://your_proxy_address:port",
+                "https": "https://your_proxy_address:port",
+            proxies = None # 如果没有代理，请保持为None
     
-            try:
-                response = requests.get(url, headers=headers, timeout=10)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, 'lxml')
+            # --- 修改: 使用带重试的函数发起请求 ---
+            response = make_request_with_retry(url, headers, proxies=proxies)
     
-                listings_on_page = soup.find_all('div', class_='content__list--item')
-                if not listings_on_page:
-                    print(f"警告: 在第 {page} 页没有找到房源信息，爬取提前结束。")
-                    break
-    
-                count_on_page = 0
-                for item in listings_on_page:
-                    listing_data = parse_standard_listing(item)
-                    if listing_data:
-                        all_listings.append(listing_data)
-                        count_on_page += 1
-    
-                print(f"第 {page} 页成功解析 {count_on_page} 条【普通房源】。")
-    
-                sleep_time = random.uniform(2, 4)
-                print(f"休眠 {sleep_time:.2f} 秒...")
-                time.sleep(sleep_time)
-    
-            except requests.exceptions.RequestException as e:
-                print(f"请求第 {page} 页时发生网络错误: {e}")
-                print("爬虫停止。")
+            if response is None:
+                print(f"在多次重试后，仍然无法获取第 {page} 页。爬虫终止。")
                 break
-            except Exception as e:
-                print(f"处理第 {page} 页时发生未知错误: {e}")
+    
+            soup = BeautifulSoup(response.text, 'lxml')
+            listings_on_page = soup.find_all('div', class_='content__list--item')
+    
+            if not listings_on_page:
+                print(f"警告: 在第 {page} 页没有找到房源信息。")
+                # --- 新增: 保存错误页面HTML以供分析 ---
+                error_filename = f'error_page_{page}.html'
+                with open(error_filename, 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+                print(f"该页面的HTML内容已保存到 {error_filename}，请检查是否出现验证码或网站结构已改变。")
                 break
+    
+            count_on_page = 0
+            for item in listings_on_page:
+                listing_data = parse_standard_listing(item)
+                if listing_data:
+                    all_listings.append(listing_data)
+                    count_on_page += 1
+    
+            print(f"第 {page} 页成功解析 {count_on_page} 条【普通房源】。")
+            
+            # 使用更长的随机休眠时间
+            sleep_time = random.uniform(3, 6)
+            print(f"为防止被封，休眠 {sleep_time:.2f} 秒...")
+            time.sleep(sleep_time)
     
         print("--- 爬取结束 ---")
     
@@ -133,16 +166,14 @@
             return pd.DataFrame()
     
     if __name__ == '__main__':
-        PAGES_TO_SCRAPE = 3  #可以把数字改成自己想爬取的页数
-    
+        PAGES_TO_SCRAPE = 3 #可更改爬取页数
         rent_data_df = get_beike_rent_info_final_v2(max_pages=PAGES_TO_SCRAPE)
     
         if not rent_data_df.empty:
             try:
-                output_filename = '文件保存位置' #选择文件保存路径及命名，保存为csv文件
+                output_filename = '' # 更改输出文件名，保存为csv文件
                 columns_order = ['标题', '价格(元/月)', '区域', '户型', '面积(㎡)', '朝向', '详情链接']
                 rent_data_df = rent_data_df.reindex(columns=columns_order)
-    
                 rent_data_df.to_csv(output_filename, index=False, encoding='utf-8-sig')
     
                 print(f"\n成功爬取 {len(rent_data_df)} 条【普通房源】信息。")
@@ -309,52 +340,54 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
     import requests
     import time
     import folium
-    from folium.plugins import FeatureGroupSubGroup, MarkerCluster 
+    from folium.plugins import MarkerCluster
     
-    GAODE_API_KEY = "你的api"  #此处填入高德地图api
-    COMPANY_ADDRESS = "公司地址" #和上一段代码一样的公司地址
-    WEIGHTS = {'price': 0.4, 'commute': 0.4, 'area': 0.2}  #此处是修改权重，    'price':价格权重 'commute':通勤权重  'area':面积权重 ，总和一定为1.0
-    INPUT_CSV = '读取的数据'  #上一段代码保存的路径
-    OUTPUT_CSV_SCORED = '保存的数据'  #建模后保存的csv文件路径
-    OUTPUT_MAP_HTML = '保存的地图' #建模地图，尾缀为.html
-
     
-    def get_coordinates_final(area_string, api_key):
+    GAODE_API_KEY = ""  #填入高德地图申请的web服务api
     
+    
+    COMPANY_ADDRESS = "杭州市西湖区文三路391号" #填入你公司的地址，从市到区再到具体，例如杭州市西湖区文三路391号
+    CITY_NAME = "杭州"  #把城市改成之前选定的，如杭州
+    WEIGHTS = {'price': 0.4, 'commute': 0.4, 'area': 0.2}
+    INPUT_CSV = '' #上一段代码保存的csv文件
+    OUTPUT_CSV_SCORED = '' 保存生成的csv文件的路径
+    OUTPUT_MAP_HTML = '' 保存生成的地图，尾缀为.html
+    
+    
+    def get_coordinates(area_string, api_key):
         parts = area_string.split(' - ')
-        keyword = parts[-1] 
-        
-    
-        lat, lon = search_poi_by_keyword(keyword, api_key)
+        keyword = parts[-1]
+        lat, lon = search_poi_by_keyword(keyword, CITY_NAME, api_key)
         if lat:
+            print(f"  > 策略1成功 (POI搜索): {keyword}")
             return lat, lon
     
-    
-        lat, lon = get_single_coordinate(f"你所爬取的城市{keyword}", api_key) #把城市改成之前选定的，如杭州
+        lat, lon = get_single_coordinate(f"{CITY_NAME}{keyword}", api_key)
         if lat:
+            print(f"  > 策略2成功 (小区名编码): {keyword}")
             return lat, lon
     
-    
-        full_address = f"你所爬取的城市{area_string.replace(' - ', '')}" #把城市改成之前选定的，如杭州
+        full_address = f"{CITY_NAME}{area_string.replace(' - ', '')}"
         lat, lon = get_single_coordinate(full_address, api_key)
         if not lat:
             print(f"    -> 所有策略均失败: {area_string}")
     
         return lat, lon
     
-    def search_poi_by_keyword(keyword, api_key):
+    def search_poi_by_keyword(keyword, city, api_key):
         url = "https://restapi.amap.com/v3/place/text"
         params = {
             'key': api_key,
             'keywords': keyword,
-            'city': '你所爬取的城市', #把城市改成之前选定的，如杭州
-            'citylimit': True, 
+            'city': city,
+            'citylimit': True,
             'types': '120302' 
+        }
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=5)
             data = response.json()
             if data['status'] == '1' and data['pois']:
-                location = data['pois'][0]['location'] 
+                location = data['pois'][0]['location']
                 lon, lat = map(float, location.split(','))
                 return lat, lon
         except Exception:
@@ -363,9 +396,9 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
     
     def get_single_coordinate(address, api_key):
         geocode_url = "https://restapi.amap.com/v3/geocode/geo"
-        params = {'key': api_key, 'address': address, 'city': '你所爬取的城市'} #把城市改成之前选定的，如杭州
+        params = {'key': api_key, 'address': address}
         try:
-            response = requests.get(geocode_url, params=params, timeout=10)
+            response = requests.get(geocode_url, params=params, timeout=5)
             data = response.json()
             if data['status'] == '1' and data['geocodes']:
                 location = data['geocodes'][0]['location']
@@ -376,7 +409,7 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
         return None, None
     
     def main():
-        if GAODE_API_KEY == "在这里粘贴你从高德开放平台获取的Key": #填写你的高德地图api
+        if GAODE_API_KEY == "在这里粘贴你从高德开放平台获取的Key":
             print("错误：请先在代码中配置你的高德API Key！")
             return
     
@@ -386,41 +419,44 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
         df['面积(㎡)'] = pd.to_numeric(df['面积(㎡)'], errors='coerce')
         df['通勤时间(分钟)'] = pd.to_numeric(df['公交时间'].str.extract(r'([\d\.]+)')[0], errors='coerce')
         df.dropna(subset=['价格(元/月)', '面积(㎡)', '通勤时间(分钟)'], inplace=True)
+        df.reset_index(drop=True, inplace=True)
         print(f"清洗后剩余 {len(df)} 条有效房源。")
+    
         print("开始数据标准化...")
         df['价格得分'] = (df['价格(元/月)'].max() - df['价格(元/月)']) / (df['价格(元/月)'].max() - df['价格(元/月)'].min())
         df['通勤得分'] = (df['通勤时间(分钟)'].max() - df['通勤时间(分钟)']) / (df['通勤时间(分钟)'].max() - df['通勤时间(分钟)'].min())
         df['面积得分'] = (df['面积(㎡)'] - df['面积(㎡)'].min()) / (df['面积(㎡)'].max() - df['面积(㎡)'].min())
+    
         print("计算性价比得分...")
         df['性价比得分'] = ((df['价格得分'] * WEIGHTS['price'] + df['通勤得分'] * WEIGHTS['commute'] + df['面积得分'] * WEIGHTS['area'])* 100).round(1)
     
-        print("正在获取房源和公司地理坐标 (已采用最终优化策略)...")
+        print("\n正在获取房源和公司地理坐标...")
         company_lat, company_lon = get_single_coordinate(COMPANY_ADDRESS, GAODE_API_KEY)
         if not company_lat:
             print("致命错误：无法获取公司坐标，程序终止。")
             return
+        print(f"公司坐标获取成功: {company_lat}, {company_lon}")
     
-        coords = [get_coordinates_final(row['区域'], GAODE_API_KEY) for index, row in df.iterrows()]
-        coord_df = pd.DataFrame(coords, columns=['纬度', '经度'], index=df.index)
-        df = pd.concat([df, coord_df], axis=1)
+        coords_df = df.apply(lambda row: get_coordinates(row['区域'], GAODE_API_KEY), axis=1, result_type='expand')
+        coords_df.columns = ['纬度', '经度']
+        df = pd.concat([df, coords_df], axis=1)
     
         original_count = len(df)
         df.dropna(subset=['纬度', '经度'], inplace=True)
-        print(f"成功获取 {len(df)} / {original_count} 条房源的地理坐标。")
+        print(f"\n成功获取 {len(df)} / {original_count} 条房源的地理坐标。")
         
         df.to_csv(OUTPUT_CSV_SCORED, index=False, encoding='utf-8-sig')
         print(f"\n成功！已将包含性价比得分和坐标的最终数据保存到:\n{OUTPUT_CSV_SCORED}")
     
         print("正在生成交互式地图...")
         m = folium.Map(location=[company_lat, company_lon], zoom_start=12)
-        folium.Marker(location=[company_lat, company_lon], popup=f"<strong>公司地址</strong>", icon=folium.Icon(color='red', icon='building', prefix='fa')).add_to(m)
+        folium.Marker(
+            location=[company_lat, company_lon], 
+            popup=f"<strong>{COMPANY_ADDRESS}</strong>", 
+            icon=folium.Icon(color='red', icon='building', prefix='fa')
+        ).add_to(m)
     
-    
-        marker_cluster = MarkerCluster(name='房源聚合').add_to(m)
-        
-    
-        spider_group = FeatureGroupSubGroup(marker_cluster, '所有房源')
-        m.add_child(spider_group)
+        marker_cluster = MarkerCluster().add_to(m)
     
         for idx, row in df.iterrows():
             score = row['性价比得分']
@@ -429,14 +465,23 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
             elif score > 40: color = 'orange'
             else: color = 'gray'
     
-            popup_html = f"<b>{row['标题']}</b><hr style='margin: 5px 0;'>性价比得分: <b><font color='{color}'>{score}</font></b><br>价格: {row['价格(元/月)']} 元/月<br>..."
+            popup_html = f"""
+            <div style="font-family: Arial, sans-serif; font-size: 14px;">
+                <b>{row['标题']}</b>
+                <hr style="margin: 5px 0;">
+                性价比得分: <b style="color:{color}; font-size:16px;">{score}</b><br>
+                价格: <b>{int(row['价格(元/月)'])}</b> 元/月<br>
+                面积: {int(row['面积(㎡)'])} ㎡<br>
+                通勤时间: {int(row['通勤时间(分钟)'])} 分钟<br>
+                区域: {row['区域']}
+            </div>
+            """
             
-    
             folium.CircleMarker(
                 location=[row['纬度'], row['经度']],
-                radius=5, color=color, fill=True, fill_color=color,
+                radius=5, color=color, fill=True, fill_color=color, fill_opacity=0.7,
                 popup=folium.Popup(popup_html, max_width=300)
-            ).add_to(spider_group)
+            ).add_to(marker_cluster)
             
         m.save(OUTPUT_MAP_HTML)
         print(f"成功！已将交互式地图保存到:\n{OUTPUT_MAP_HTML}")
@@ -444,7 +489,3 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
     
     if __name__ == '__main__':
         main()
-
-
-
-
