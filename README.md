@@ -27,13 +27,13 @@
     import re
     
     def parse_standard_listing(item):
-    
         try:
             title_element = item.find('p', class_='content__list--item--title')
             if not title_element or not title_element.find('a'):
-                return None 
+                return None
     
-            detail_link = "贝壳租房网站" + title_element.find('a')['href']  #此处更换自己所查取的网站
+            detail_link = "https://hz.zu.ke.com" + title_element.find('a')['href']  #此处更换自己所查取的网站
+    
             if '/apartment/' in detail_link:
                 return None
     
@@ -51,11 +51,12 @@
             else:
                 return None 
     
+    
             des_element = item.find('p', class_='content__list--item--des')
             if des_element:
                 full_des_text = des_element.get_text(strip=True)
                 des_parts = [part.strip() for part in full_des_text.split('/')]
-                
+    
                 if des_parts:
                     location_info = des_parts.pop(0).replace('·', ' - ')
                     listing_data['区域'] = location_info
@@ -65,32 +66,39 @@
                         listing_data['面积(㎡)'] = re.sub(r'\s*㎡', '', part)
                     elif '室' in part or '厅' in part or '卫' in part:
                         listing_data['户型'] = part
-                    elif len(part) <= 2 and any(d in part for d in ['东', '南', '西', '北']):
+                    # 简单的朝向判断
+                    elif len(part.strip()) <= 2 and any(d in part for d in ['东', '南', '西', '北']):
                         listing_data['朝向'] = part
-            
+    
             return listing_data
     
-        except Exception:
+        except Exception as e:
+    
+            print(f"解析单个房源时出错: {e}")
             return None
     
     def get_beike_rent_info_final_v2(max_pages=5):
-        base_url = "贝壳租房网站"  #此处更换自己所查取的网站
+    
+        base_url = "https://hz.zu.ke.com/zufang" #此处更换自己所查取的网站
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
-        
+    
         all_listings = []
         print(f"--- 自动跳过所有品牌公寓房源 ---")
     
         for page in range(1, max_pages + 1):
-            url = f"{base_url}pg{page}/"
+    
+            url = f"{base_url}/pg{page}/"
+    
+    
             print(f"正在爬取第 {page} 页: {url}")
     
             try:
-                response = requests.get(url, headers=headers, timeout=15)
+                response = requests.get(url, headers=headers, timeout=10)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'lxml')
-                
+    
                 listings_on_page = soup.find_all('div', class_='content__list--item')
                 if not listings_on_page:
                     print(f"警告: 在第 {page} 页没有找到房源信息，爬取提前结束。")
@@ -102,7 +110,7 @@
                     if listing_data:
                         all_listings.append(listing_data)
                         count_on_page += 1
-                
+    
                 print(f"第 {page} 页成功解析 {count_on_page} 条【普通房源】。")
     
                 sleep_time = random.uniform(2, 4)
@@ -111,17 +119,21 @@
     
             except requests.exceptions.RequestException as e:
                 print(f"请求第 {page} 页时发生网络错误: {e}")
+                print("爬虫停止。")
                 break
-                
+            except Exception as e:
+                print(f"处理第 {page} 页时发生未知错误: {e}")
+                break
+    
         print("--- 爬取结束 ---")
-        
+    
         if all_listings:
             return pd.DataFrame(all_listings)
         else:
             return pd.DataFrame()
     
     if __name__ == '__main__':
-        PAGES_TO_SCRAPE = 20  #可以把数字改成自己想爬取的页数
+        PAGES_TO_SCRAPE = 3  #可以把数字改成自己想爬取的页数
     
         rent_data_df = get_beike_rent_info_final_v2(max_pages=PAGES_TO_SCRAPE)
     
@@ -129,13 +141,13 @@
             try:
                 output_filename = '文件保存位置' #选择文件保存路径及命名，保存为csv文件
                 columns_order = ['标题', '价格(元/月)', '区域', '户型', '面积(㎡)', '朝向', '详情链接']
-                rent_data_df = rent_data_df.reindex(columns=columns_order) 
-                
+                rent_data_df = rent_data_df.reindex(columns=columns_order)
+    
                 rent_data_df.to_csv(output_filename, index=False, encoding='utf-8-sig')
-                
+    
                 print(f"\n成功爬取 {len(rent_data_df)} 条【普通房源】信息。")
                 print(f"数据已保存到文件: {output_filename}")
-                print("\n数据预览:")
+                print("\n数据预览 (前5条):")
                 print(rent_data_df.head())
             except Exception as e:
                 print(f"保存文件时出错: {e}")
@@ -432,6 +444,7 @@ python另起新一段，输入以下代码，按照#号后面的注释修改代�
     
     if __name__ == '__main__':
         main()
+
 
 
 
