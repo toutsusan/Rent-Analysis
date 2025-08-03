@@ -8,15 +8,16 @@
 
 首先先安装必要的库
 
-pip install requests
+    pip install requests
+    
+    pip install beautifulsoup4
+    
+    pip install lxml
+    
+    pip install pandas
+    
+    pip install folium
 
-pip install beautifulsoup4
-
-pip install lxml
-
-pip install pandas
-
-pip install folium
 
 
 
